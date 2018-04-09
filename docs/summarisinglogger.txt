@@ -425,9 +425,101 @@ The example above shows a few things. Firstly, when messages are
 excluded, a ``CRITICAL`` entry is logged with the number of messages
 that have been excluded. Secondly, excluded messages still contribute
 to the highest level logged used in both the subject and the
-``X-Log-Level`` header. Finally, the last 5 messages logged before the
+``X-Log-Level`` header. The last 5 messages logged before the
 mail is sent are always included as they may well contain useful
 information such as a terminal exception or total run time.
+
+However, this flood supression means that the ``WARNING`` or ``ERROR`` entry
+of interest is hidden (although it will still contribute to the highest level
+logged). The `provide_context` option allows the specification of a logging level
+(for example ``logging.WARNING``) that should still be sent even in the event of
+the flood limit being triggered. When this option is provided, the last 5 log messages
+at the level specified by `provide_context` or above will be provided with up to 5 lines
+of context:
+
+>>> handler = SummarisingLogger('from@example.com', ('to@example.com',),
+...                             flood_level=2, provide_context=logging.WARNING)
+>>> handler.setFormatter(logging.Formatter('%(levelname)s -  %(message)s'))
+>>> logger.addHandler(handler)
+>>> logging.info('message 1')
+>>> logging.info('message 2')
+>>> logging.error('error message 3')
+>>> logging.info('something happens before a warning')
+>>> logging.warning('A warning')
+>>> logging.info('message 4')
+>>> logging.info('message 5')
+>>> logging.info('message 6')
+>>> logging.info('message 7')
+>>> logging.info('message 8')
+>>> logging.shutdown()
+>>> server.check_sent_message_matches("""\
+... Content-Type: text/plain; charset="us-ascii"
+... MIME-Version: 1.0
+... Content-Transfer-Encoding: 7bit
+... Subject: Summary of Log Messages (ERROR)
+... From: from@example.com
+... To: to@example.com
+... X-Mailer: MailingLogger...
+... X-Log-Level: ERROR
+... Date: Mon, 01 Jan 2007 12:34:56 -0000
+... Message-ID: <...MailingLogger@...>
+... <BLANKLINE>
+... INFO -  message 1
+... INFO -  message 2
+... ERROR -  error message 3
+... INFO -  something happens before a warning
+... WARNING -  A warning
+... INFO -  message 4
+... INFO -  message 5
+... INFO -  message 6
+... INFO -  message 7
+... INFO -  message 8
+... <BLANKLINE>""")
+True
+
+Note that in this case, although the flood limit was exceeded, all records
+were logged so there is no ``CRITICAL`` message. If some messages were still
+suppressed then there would still be a message logged at ``CRITICAL`` level:
+
+>>> handler = SummarisingLogger('from@example.com', ('to@example.com',),
+...                             flood_level=2, provide_context=logging.WARNING)
+>>> handler.setFormatter(logging.Formatter('%(levelname)s -  %(message)s'))
+>>> logger.addHandler(handler)
+>>> for i in range(20):
+...     logging.info('Something interesting happens before %s', i)
+...     logging.warning('message %s', i)
+>>> logging.shutdown()
+>>> server.check_sent_message_matches("""\
+... Content-Type: text/plain; charset="us-ascii"
+... MIME-Version: 1.0
+... Content-Transfer-Encoding: 7bit
+... Subject: Summary of Log Messages (WARNING)
+... From: from@example.com
+... To: to@example.com
+... X-Mailer: MailingLogger...
+... X-Log-Level: WARNING
+... Date: Mon, 01 Jan 2007 12:34:56 -0000
+... Message-ID: <...MailingLogger@...>
+... <BLANKLINE>
+... INFO -  Something interesting happens before 0
+... WARNING -  message 0
+... CRITICAL -  25 messages not included as flood limit of 2 exceeded
+... WARNING -  message 13
+... INFO -  Something interesting happens before 14
+... WARNING -  message 14
+... INFO -  Something interesting happens before 15
+... WARNING -  message 15
+... INFO -  Something interesting happens before 16
+... WARNING -  message 16
+... INFO -  Something interesting happens before 17
+... WARNING -  message 17
+... INFO -  Something interesting happens before 18
+... WARNING -  message 18
+... INFO -  Something interesting happens before 19
+... WARNING -  message 19
+... <BLANKLINE>""")
+True
+
 
 Sending empty emails
 --------------------

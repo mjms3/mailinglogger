@@ -3,6 +3,8 @@ import os
 import threading
 from unittest import TestCase
 
+from textwrap import dedent
+
 from mailinglogger.SummarisingLogger import SummarisingLogger
 from mailinglogger.common import exit_handler_manager
 from mailinglogger.tests.shared import DummySMTP, removeHandlers, _check_sent_message
@@ -124,6 +126,68 @@ class TestSummarisingLogger(TestCase):
             'WARNING - message 7',
             'WARNING - message 8',
         ]), m)
+
+    def test_interesting_stuff_after_flood_level_provide_context(self):
+        self.create('from@example.com', ('to@example.com',),
+                    flood_level=6, provide_context=logging.WARNING)
+        self.handler.setFormatter(
+            logging.Formatter('%(levelname)s - %(message)s')
+        )
+        for i in range(5):
+            logging.info('Something interesting happens before %s', i)
+            logging.warning('message %s', i)
+        logging.shutdown()
+        self.assertEqual(len(DummySMTP.sent), 1)
+        m = DummySMTP.sent[0].msg
+        self.assertTrue('Subject: Summary of Log Messages (WARNING)' in m, m)
+        _check_sent_message('\n'.join([
+            'INFO - Something interesting happens before 0',
+            'WARNING - message 0',
+            'INFO - Something interesting happens before 1',
+            'WARNING - message 1',
+            'INFO - Something interesting happens before 2',
+            'WARNING - message 2',
+            'INFO - Something interesting happens before 3',
+            'WARNING - message 3',
+            'INFO - Something interesting happens before 4',
+            'WARNING - message 4',
+        ]), m)
+
+    def test_too_much_interesting_stuff_after_flood_still_truncated(self):
+        self.create('from@example.com', ('to@example.com',),
+                    flood_level=6, provide_context=logging.WARNING)
+        self.handler.setFormatter(
+            logging.Formatter('%(levelname)s - %(message)s')
+        )
+        for i in range(20):
+            logging.info('Something interesting happens before %s', i)
+            logging.warning('message %s', i)
+        logging.shutdown()
+        self.assertEqual(len(DummySMTP.sent), 1)
+        m = DummySMTP.sent[0].msg
+        self.assertTrue('Subject: Summary of Log Messages (WARNING)' in m, m)
+        _check_sent_message(dedent("""\
+            INFO - Something interesting happens before 0
+            WARNING - message 0
+            INFO - Something interesting happens before 1
+            WARNING - message 1
+            INFO - Something interesting happens before 2
+            WARNING - message 2
+            CRITICAL - 21 messages not included as flood limit of 6 exceeded
+            WARNING - message 13
+            INFO - Something interesting happens before 14
+            WARNING - message 14
+            INFO - Something interesting happens before 15
+            WARNING - message 15
+            INFO - Something interesting happens before 16
+            WARNING - message 16
+            INFO - Something interesting happens before 17
+            WARNING - message 17
+            INFO - Something interesting happens before 18
+            WARNING - message 18
+            INFO - Something interesting happens before 19
+            WARNING - message 19
+        """), m)
 
     def test_flood_highest_level_still_recorded(self):
         self.create('from@example.com', ('to@example.com', ),

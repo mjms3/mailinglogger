@@ -3,6 +3,7 @@ from collections import deque
 from logging import CRITICAL, FileHandler, Formatter, LogRecord
 from tempfile import mkstemp
 
+from copy import copy
 from six import PY2
 
 from mailinglogger.MailingLogger import MailingLogger
@@ -32,6 +33,7 @@ class SummarisingLogger(FileHandler):
                  charset='utf-8',
                  content_type='text/plain',
                  flood_level=100,
+                 provide_context=None,
                  ):
         # create the "real" mailinglogger
         self.mailer = MailingLogger(fromaddr,
@@ -55,6 +57,12 @@ class SummarisingLogger(FileHandler):
         if atexit:
             exit_handler_manager.register_at_exit_handler(self.close)
 
+        self._tail = deque(maxlen=5)
+
+        self.provide_context = provide_context
+        self._additional_message_and_context = deque(maxlen=5)
+
+
     def open(self):
         # create a temp file logger to store log entries
         self.fd, self.filename = mkstemp()
@@ -73,10 +81,13 @@ class SummarisingLogger(FileHandler):
             self.maxlevelno = record.levelno
 
         self.message_count += 1
+        self._tail.append(record)
+        if self.message_count == self.flood_level:
+            self._records_emitted_prior_to_flood_limit = copy(self._tail)
+
         if self.message_count > self.flood_level:
-            if self.tail is None:
-                self.tail = deque(maxlen=5)
-            self.tail.append(record)
+            if self.provide_context and record.levelno >= self.provide_context:
+                self._additional_message_and_context.append(copy(self._tail))
         else:
             FileHandler.emit(self, record)
 
@@ -86,23 +97,33 @@ class SummarisingLogger(FileHandler):
         self.closed = True
 
         if self.message_count > self.flood_level:
-            hidden = self.message_count - self.flood_level - len(self.tail)
-            if hidden:
+            records_to_emit = []
+            for message_with_context in self._additional_message_and_context:
+                for record in message_with_context:
+                    if record not in records_to_emit:
+                        records_to_emit.append(record)
+
+            for record in self._tail:
+                if record not in records_to_emit:
+                    records_to_emit.append(record)
+
+            records_to_emit = [r for r in records_to_emit if r not in self._records_emitted_prior_to_flood_limit]
+
+            hidden = self.message_count - self.flood_level - len(records_to_emit)
+            if hidden > 0:
                 # send critical error
                 FileHandler.emit(self, LogRecord(
                     name='flood',
                     level=CRITICAL,
                     pathname='',
                     lineno=0,
-                    msg=flood_template % (
-                        self.message_count - self.flood_level - len(self.tail),
-                        self.flood_level
-                    ),
+                    msg=flood_template % (hidden, self.flood_level),
                     args=(),
                     exc_info=None
                 ))
-            for record in self.tail:
+            for record in records_to_emit:
                 FileHandler.emit(self, record)
+
 
         FileHandler.close(self)
 

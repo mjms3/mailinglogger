@@ -174,4 +174,4 @@ def _check_sent_message(expected_message, m):
     sent_message = sent_email.get_payload(decode=True)
     if PY3:
         sent_message = sent_message.decode(sent_email.get_content_charset())
-    assert expected_message in sent_message, "Expected: %s to be in sent email:\n%s" % (expected_message, sent_message)
+    assert expected_message in sent_message, "Expected:\n%s\n to be in sent email:\n%s" % (expected_message, sent_message)
